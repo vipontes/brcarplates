@@ -2,11 +2,17 @@ package br.net.easify.brcarplates
 
 import android.Manifest
 import android.app.Activity
+import android.content.ContentValues
+import android.content.Context
+import android.content.ContextWrapper
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.drawable.BitmapDrawable
+import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
+import android.view.View
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import com.karumi.dexter.Dexter
@@ -19,7 +25,11 @@ import com.google.firebase.ml.vision.common.FirebaseVisionImage
 import com.google.firebase.ml.vision.text.FirebaseVisionText
 import com.google.firebase.ml.vision.text.FirebaseVisionTextRecognizer
 import kotlinx.android.synthetic.main.activity_main.*
-
+import java.io.File
+import java.io.FileOutputStream
+import java.io.IOException
+import java.io.OutputStream
+import java.util.*
 
 class MainActivity : AppCompatActivity() {
 
@@ -31,7 +41,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
 
         Dexter.withActivity(this@MainActivity)
-            .withPermissions(Manifest.permission.CAMERA, Manifest.permission.RECORD_AUDIO)
+            .withPermissions(Manifest.permission.CAMERA)
             .withListener(object : MultiplePermissionsListener {
                 override fun onPermissionsChecked(report: MultiplePermissionsReport?) {
                     setupCamera()
@@ -46,15 +56,24 @@ class MainActivity : AppCompatActivity() {
             }).check()
 
         selectImage.setOnClickListener {
-            val callCameraIntent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
-            if ( callCameraIntent.resolveActivity(packageManager) != null ) {
-                startActivityForResult(callCameraIntent, cameraRequestCode)
+            hideData()
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                openCamera()
+            } else {
+                Toast.makeText(
+                    this@MainActivity,
+                    "Sorry you're version android is not support, Min Android 6.0 (Marsmallow)",
+                    Toast.LENGTH_LONG
+                ).show()
             }
         }
 
+
+
         startRecognizing.setOnClickListener {
             if (imageView.drawable != null) {
-                editText.setText("")
+                recognizedText.setText("")
                 startRecognizing.isEnabled = false
                 val bitmap = (imageView.drawable as BitmapDrawable).bitmap
                 val image = FirebaseVisionImage.fromBitmap(bitmap)
@@ -66,7 +85,7 @@ class MainActivity : AppCompatActivity() {
                     }
                     .addOnFailureListener {
                         startRecognizing.isEnabled = true
-                        editText.setText("Failed")
+                        recognizedText.setText("Failed")
                     }
             } else {
                 Toast.makeText(this, "Select an Image First", Toast.LENGTH_LONG).show()
@@ -74,17 +93,58 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun openCamera() {
+        val values = ContentValues()
+        values.put(MediaStore.Images.Media.TITLE, "New Picture")
+        values.put(MediaStore.Images.Media.DESCRIPTION, "From the Camera")
+
+        // camera intent
+        val cameraIntent = Intent(MediaStore.ACTION_IMAGE_CAPTURE)
+
+        startActivityForResult(cameraIntent, cameraRequestCode)
+    }
+
+    private fun saveImageToInternalStorage(bitmap: Bitmap): Uri {
+
+        val wrapper = ContextWrapper(applicationContext)
+        var file = wrapper.getDir("images", Context.MODE_PRIVATE)
+        file = File(file, "${UUID.randomUUID()}.jpg")
+
+        try {
+            val stream: OutputStream = FileOutputStream(file)
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 100, stream)
+            stream.flush()
+            stream.close()
+        } catch (e: IOException) {
+            e.printStackTrace()
+        }
+
+        return Uri.parse(file.absolutePath)
+    }
+
     private fun setupCamera() {
         detector = FirebaseVision.getInstance().onDeviceTextRecognizer
+    }
+
+    private fun hideData() {
+        startRecognizing.visibility = View.GONE
+        recognizedText.setText("")
+    }
+
+    private fun showOption() {
+        startRecognizing.visibility = View.VISIBLE
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
 
-        when(requestCode) {
+        when (requestCode) {
             cameraRequestCode -> {
-                if ( resultCode == Activity.RESULT_OK && data != null) {
-                    imageView.setImageBitmap(data.extras!!.get("data") as Bitmap)
+                if (resultCode == Activity.RESULT_OK && data != null) {
+                    val bitmap = data.extras!!.get("data") as Bitmap
+                    imageView.setImageBitmap(bitmap)
+                    val uri: Uri = saveImageToInternalStorage(bitmap)
+                    showOption()
                 }
             }
         }
@@ -92,16 +152,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun processResultText(resultText: FirebaseVisionText) {
         if (resultText.textBlocks.size == 0) {
-            editText.setText("No Text Found")
+            recognizedText.setText("No Text Found")
             return
         }
         for (block in resultText.textBlocks) {
             val blockText = block.text
-            editText.append(blockText + "\n")
+            recognizedText.append(blockText + "\n")
         }
     }
 }
-
 
 /*
 package br.net.easify.brcarplates
